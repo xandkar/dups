@@ -3,6 +3,7 @@ open Printf
 module Array = ArrayLabels
 module List  = ListLabels
 module StrSet= Set.Make(String)
+module Unix  = UnixLabels
 
 module Stream : sig
   type 'a t
@@ -80,60 +81,98 @@ type input =
   | Root_paths of string list
   | Paths_on_stdin
 
-let main input =
-  let paths =
-    match input with
-    | Paths_on_stdin ->
-        In_channel.lines stdin
-    | Root_paths paths ->
-        let paths = StrSet.elements (StrSet.of_list paths) in
-        Stream.concat (List.map paths ~f:Directory_tree.find_files)
-  in
+type output =
+  | Stdout
+  | Directory of string
+
+let make_input_stream = function
+  | Paths_on_stdin ->
+      In_channel.lines stdin
+  | Root_paths paths ->
+      let paths = StrSet.elements (StrSet.of_list paths) in
+      Stream.concat (List.map paths ~f:Directory_tree.find_files)
+
+let make_output_fun = function
+  | Stdout ->
+      fun digest n_paths paths ->
+        printf "%s %d\n%!" (Digest.to_hex digest) n_paths;
+        List.iter (StrSet.elements paths) ~f:(printf "    %S\n%!")
+  | Directory dir ->
+      fun digest _ paths ->
+        let digest = Digest.to_hex digest in
+        let dir = Filename.concat dir (String.sub digest 0 2) in
+        Unix.mkdir dir ~perm:0o700;
+        let oc = open_out (Filename.concat dir digest) in
+        List.iter (StrSet.elements paths) ~f:(fun path ->
+          output_string oc (sprintf "%S\n%!" path)
+        );
+        close_out oc
+
+let main input output =
+  let output = make_output_fun  output in
+  let input  = make_input_stream input in
   let paths_by_digest = Hashtbl.create 1_000_000 in
   let path_count = ref 0 in
   let t0 = Sys.time () in
-  Stream.iter paths ~f:(fun path ->
+  Stream.iter input ~f:(fun path ->
     incr path_count;
     try
       let digest = Digest.file path in
-      let paths =
+      let count, paths =
         match Hashtbl.find_opt paths_by_digest digest with
         | None ->
-            StrSet.empty
-        | Some paths ->
-            paths
+            (0, StrSet.empty)
+        | Some (n, paths) ->
+            (n, paths)
       in
-      Hashtbl.replace paths_by_digest digest (StrSet.add path paths)
+      Hashtbl.replace paths_by_digest digest (count + 1, StrSet.add path paths)
     with Sys_error e ->
       eprintf "WARNING: Failed to process %S: %S\n%!" path e
   );
-  Hashtbl.iter
-    (fun digest paths ->
-      let n_paths = StrSet.cardinal paths in
-      if n_paths > 1 then begin
-        printf "%s %d\n%!" (Digest.to_hex digest) n_paths;
-        List.iter (StrSet.elements paths) ~f:(printf "    %S\n%!")
-      end
-    )
-    paths_by_digest;
+  Hashtbl.iter (fun d (n, ps) -> if n > 1 then output d n ps) paths_by_digest;
   let t1 = Sys.time () in
   eprintf "Processed %d files in %f seconds.\n%!" !path_count (t1 -. t0)
 
 let () =
-  let input = ref Paths_on_stdin in
-  Arg.parse
-    []
-    (function
-    | path when Sys.file_exists path ->
-        (match !input with
-        | Paths_on_stdin ->
-            input := Root_paths [path]
-        | Root_paths paths ->
-            input := Root_paths (path :: paths)
+  let input  = ref Paths_on_stdin in
+  let output = ref Stdout in
+  let assert_file_exists path =
+    if Sys.file_exists path then
+      ()
+    else begin
+      eprintf "File does not exist: %S\n%!" path;
+      exit 1
+    end
+  in
+  let assert_file_is_dir path =
+    if Sys.is_directory path then
+      ()
+    else begin
+      eprintf "File is not a directory: %S\n%!" path;
+      exit 1
+    end
+  in
+  let spec =
+    [ ( "-out"
+      , Arg.String (fun path ->
+          assert_file_exists path;
+          assert_file_is_dir path;
+          output := Directory path
         )
-    | path ->
-        eprintf "File does not exist: %S\n%!" path;
-        exit 1
+      , " Output to this directory instead of stdout."
+      )
+    ]
+  in
+  Arg.parse
+    (Arg.align spec)
+    (fun path ->
+      assert_file_exists path;
+      assert_file_is_dir path;
+      match !input with
+      | Paths_on_stdin ->
+          input := Root_paths [path]
+      | Root_paths paths ->
+          input := Root_paths (path :: paths)
     )
     "";
-  main !input
+  main !input !output
