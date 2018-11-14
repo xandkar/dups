@@ -58,25 +58,16 @@ end = struct
             ()
       )
     in
-    let next_dir () =
-      match Queue.take dirs with
-      | exception Queue.Empty ->
-          ()
-      | dir ->
-          explore dir
-    in
-    let next_file () =
-      match Queue.take files with
-      | exception Queue.Empty ->
-          None
-      | file_path ->
-          Some file_path
-    in
     explore root;
-    Stream.create (fun () ->
-      next_dir ();
-      next_file ()
-    )
+    let rec next () =
+      match Queue.is_empty files, Queue.is_empty dirs with
+      | false, _     -> Some (Queue.take files)
+      | true , true  -> None
+      | true , false ->
+          explore (Queue.take dirs);
+          next ()
+    in
+    Stream.create next
 end
 
 type input =
