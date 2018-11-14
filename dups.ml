@@ -112,12 +112,14 @@ let main input =
 
 let () =
   let input = ref Paths_on_stdin in
-  Arg.parse [] (fun path ->
-    if Sys.file_exists path then
-      input := Root_path path
-    else begin
-      eprintf "File does not exist: %S\n%!" path;
-      exit 1
-    end
-  ) "";
+  Arg.parse
+    []
+    (function
+    | path when Sys.file_exists path ->
+        input := Root_path path
+    | path ->
+        eprintf "File does not exist: %S\n%!" path;
+        exit 1
+    )
+    "";
   main !input
