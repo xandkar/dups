@@ -1,16 +1,17 @@
-TARGET := dupfiles.native
+EXE_NAME := dupfiles
+EXE_TYPE := native
 
-.PHONY: all build clean run
+.PHONY: all build clean
 
 all:
 	@$(MAKE) -s clean
 	@$(MAKE) -s build
 
 build:
-	@ocamlbuild -cflags '-w A' -pkg 'unix' $(TARGET)
+	@ocamlbuild -cflags '-w A' -pkg 'unix' $(EXE_NAME).$(EXE_TYPE)
+	@cp _build/$(EXE_NAME).$(EXE_TYPE) $(EXE_NAME)
+	@rm -f $(EXE_NAME).$(EXE_TYPE)
 
 clean:
 	@ocamlbuild -clean
-
-run:
-	@find ~ -type f | egrep -v '/.git/' | ./$(TARGET)
+	@rm -f $(EXE_NAME)
