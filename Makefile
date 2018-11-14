@@ -1,4 +1,4 @@
-EXE_NAME := dupfiles
+EXE_NAME := dups
 EXE_TYPE := native
 
 .PHONY: all build clean
