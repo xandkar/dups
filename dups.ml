@@ -2,6 +2,7 @@ open Printf
 
 module Array = ArrayLabels
 module List  = ListLabels
+module StrSet= Set.Make(String)
 
 module Stream : sig
   type 'a t
@@ -9,17 +10,22 @@ module Stream : sig
   val create : (unit -> 'a option) -> 'a t
 
   val iter : 'a t -> f:('a -> unit) -> unit
+
+  val concat : ('a t) list -> 'a t
 end = struct
   module S = Stream
 
   type 'a t =
-    'a S.t
+    ('a S.t) list
 
   let create f =
-    S.from (fun _ -> f ())
+    [S.from (fun _ -> f ())]
 
   let iter t ~f =
-    S.iter f t
+    List.iter t ~f:(S.iter f)
+
+  let concat ts =
+    List.concat ts
 end
 
 module In_channel : sig
@@ -71,14 +77,17 @@ end = struct
 end
 
 type input =
-  | Root_path of string
+  | Root_paths of string list
   | Paths_on_stdin
 
 let main input =
   let paths =
     match input with
-    | Paths_on_stdin -> In_channel.lines stdin
-    | Root_path root -> Directory_tree.find_files root
+    | Paths_on_stdin ->
+        In_channel.lines stdin
+    | Root_paths paths ->
+        let paths = StrSet.elements (StrSet.of_list paths) in
+        Stream.concat (List.map paths ~f:Directory_tree.find_files)
   in
   let paths_by_digest = Hashtbl.create 1_000_000 in
   let path_count = ref 0 in
@@ -90,20 +99,20 @@ let main input =
       let paths =
         match Hashtbl.find_opt paths_by_digest digest with
         | None ->
-            []
+            StrSet.empty
         | Some paths ->
             paths
       in
-      Hashtbl.replace paths_by_digest digest (path :: paths)
+      Hashtbl.replace paths_by_digest digest (StrSet.add path paths)
     with Sys_error e ->
       eprintf "WARNING: Failed to process %S: %S\n%!" path e
   );
   Hashtbl.iter
     (fun digest paths ->
-      let n_paths = List.length paths in
+      let n_paths = StrSet.cardinal paths in
       if n_paths > 1 then begin
         printf "%s %d\n%!" (Digest.to_hex digest) n_paths;
-        List.iter paths ~f:(fun path -> printf "    %s\n%!" path)
+        List.iter (StrSet.elements paths) ~f:(printf "    %s\n%!")
       end
     )
     paths_by_digest;
@@ -116,7 +125,12 @@ let () =
     []
     (function
     | path when Sys.file_exists path ->
-        input := Root_path path
+        (match !input with
+        | Paths_on_stdin ->
+            input := Root_paths [path]
+        | Root_paths paths ->
+            input := Root_paths (path :: paths)
+        )
     | path ->
         eprintf "File does not exist: %S\n%!" path;
         exit 1
