@@ -41,7 +41,6 @@ end = struct
   let find_files root =
     let dirs  = Queue.create () in
     let files = Queue.create () in
-    Queue.add root dirs;
     let explore parent =
       Array.iter (Sys.readdir parent) ~f:(fun child ->
         let path = Filename.concat parent child in
@@ -73,6 +72,7 @@ end = struct
       | file_path ->
           Some file_path
     in
+    explore root;
     Stream.create (fun () ->
       next_dir ();
       next_file ()
@@ -121,5 +121,12 @@ let main input =
 
 let () =
   let input = ref Paths_on_stdin in
-  Arg.parse [] (fun path -> input := Root_path path) "";
+  Arg.parse [] (fun path ->
+    if Sys.file_exists path then
+      input := Root_path path
+    else begin
+      eprintf "File does not exist: %S\n%!" path;
+      exit 1
+    end
+  ) "";
   main !input
