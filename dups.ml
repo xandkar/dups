@@ -5,8 +5,9 @@ module List  = ListLabels
 
 module Stream : sig
   type 'a t
-  val lines : in_channel -> string t
-  val rec_file_paths : root:string -> string t
+
+  val create : (unit -> 'a option) -> 'a t
+
   val iter : 'a t -> f:('a -> unit) -> unit
 end = struct
   module S = Stream
@@ -14,7 +15,30 @@ end = struct
   type 'a t =
     'a S.t
 
-  let rec_file_paths ~root =
+  let create f =
+    S.from (fun _ -> f ())
+
+  let iter t ~f =
+    S.iter f t
+end
+
+module In_channel : sig
+  val lines : in_channel -> string Stream.t
+end = struct
+  let lines ic =
+    Stream.create (fun () ->
+      match input_line ic with
+      | exception End_of_file ->
+          None
+      | line ->
+          Some line
+    )
+end
+
+module Directory : sig
+  val find_files : string -> string Stream.t
+end = struct
+  let find_files root =
     let dirs  = Queue.create () in
     let files = Queue.create () in
     Queue.add root dirs;
@@ -49,22 +73,10 @@ end = struct
       | file_path ->
           Some file_path
     in
-    S.from (fun _ ->
+    Stream.create (fun () ->
       next_dir ();
       next_file ()
     )
-
-  let lines ic =
-    S.from (fun _ ->
-      match input_line ic with
-      | exception End_of_file ->
-          None
-      | line ->
-          Some line
-    )
-
-  let iter t ~f =
-    S.iter f t
 end
 
 type input =
@@ -74,8 +86,8 @@ type input =
 let main input =
   let paths =
     match input with
-    | Paths_on_stdin -> Stream.lines stdin
-    | Root_path root -> Stream.rec_file_paths ~root
+    | Paths_on_stdin -> In_channel.lines stdin
+    | Root_path root -> Directory.find_files root
   in
   let paths_by_digest = Hashtbl.create 1_000_000 in
   let path_count = ref 0 in
