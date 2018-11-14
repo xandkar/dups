@@ -78,17 +78,17 @@ end = struct
 end
 
 type input =
-  | Root_paths of string list
-  | Paths_on_stdin
+  | Stdin
+  | Directories of string list
 
 type output =
   | Stdout
   | Directory of string
 
 let make_input_stream = function
-  | Paths_on_stdin ->
+  | Stdin ->
       In_channel.lines stdin
-  | Root_paths paths ->
+  | Directories paths ->
       let paths = StrSet.elements (StrSet.of_list paths) in
       Stream.concat (List.map paths ~f:Directory_tree.find_files)
 
@@ -134,7 +134,7 @@ let main input output =
   eprintf "Processed %d files in %f seconds.\n%!" !path_count (t1 -. t0)
 
 let () =
-  let input  = ref Paths_on_stdin in
+  let input  = ref Stdin in
   let output = ref Stdout in
   let assert_file_exists path =
     if Sys.file_exists path then
@@ -169,10 +169,10 @@ let () =
       assert_file_exists path;
       assert_file_is_dir path;
       match !input with
-      | Paths_on_stdin ->
-          input := Root_paths [path]
-      | Root_paths paths ->
-          input := Root_paths (path :: paths)
+      | Stdin ->
+          input := Directories [path]
+      | Directories paths ->
+          input := Directories (path :: paths)
     )
     "";
   main !input !output
