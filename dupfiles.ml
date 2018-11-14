@@ -1,13 +1,60 @@
 open Printf
 
-module List = ListLabels
+module Array = ArrayLabels
+module List  = ListLabels
 
 module Stream : sig
-  val lines : in_channel -> f:(string -> unit) -> unit
+  type 'a t
+  val lines : in_channel -> string t
+  val rec_file_paths : root:string -> string t
+  val iter : 'a t -> f:('a -> unit) -> unit
 end = struct
   module S = Stream
 
-  let lines_of_channel ic =
+  type 'a t =
+    'a S.t
+
+  let rec_file_paths ~root =
+    let dirs  = Queue.create () in
+    let files = Queue.create () in
+    Queue.add root dirs;
+    let explore parent =
+      Array.iter (Sys.readdir parent) ~f:(fun child ->
+        let path = Filename.concat parent child in
+        let {Unix.st_kind = file_kind; _} = Unix.lstat path in
+        match file_kind with
+        | Unix.S_REG ->
+            Queue.add path files
+        | Unix.S_DIR ->
+            Queue.add path dirs
+        | Unix.S_CHR
+        | Unix.S_BLK
+        | Unix.S_LNK
+        | Unix.S_FIFO
+        | Unix.S_SOCK ->
+            ()
+      )
+    in
+    let next_dir () =
+      match Queue.take dirs with
+      | exception Queue.Empty ->
+          ()
+      | dir ->
+          explore dir
+    in
+    let next_file () =
+      match Queue.take files with
+      | exception Queue.Empty ->
+          None
+      | file_path ->
+          Some file_path
+    in
+    S.from (fun _ ->
+      next_dir ();
+      next_file ()
+    )
+
+  let lines ic =
     S.from (fun _ ->
       match input_line ic with
       | exception End_of_file ->
@@ -18,14 +65,20 @@ end = struct
 
   let iter t ~f =
     S.iter f t
-
-  let lines ic ~f =
-    iter (lines_of_channel ic) ~f
 end
 
-let main ic =
+type input =
+  | Root_path of string
+  | Paths_on_stdin
+
+let main input =
+  let paths =
+    match input with
+    | Paths_on_stdin -> Stream.lines stdin
+    | Root_path root -> Stream.rec_file_paths ~root
+  in
   let paths_by_digest = Hashtbl.create 1_000_000 in
-  Stream.lines ic ~f:(fun path ->
+  Stream.iter paths ~f:(fun path ->
     try
       let digest = Digest.file path in
       let paths =
@@ -50,7 +103,6 @@ let main ic =
     paths_by_digest
 
 let () =
-  let ic = ref stdin in
-  Arg.parse [] (fun filename -> ic := open_in filename) "";
-  main !ic;
-  close_in !ic
+  let input = ref Paths_on_stdin in
+  Arg.parse [] (fun path -> input := Root_path path) "";
+  main !input

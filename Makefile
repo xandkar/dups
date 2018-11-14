@@ -7,7 +7,7 @@ all:
 	@$(MAKE) -s build
 
 build:
-	@ocamlbuild -cflags '-w A' $(TARGET)
+	@ocamlbuild -cflags '-w A' -pkg 'unix' $(TARGET)
 
 clean:
 	@ocamlbuild -clean
