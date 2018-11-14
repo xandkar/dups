@@ -35,7 +35,7 @@ end = struct
     )
 end
 
-module Directory : sig
+module Directory_tree : sig
   val find_files : string -> string Stream.t
 end = struct
   let find_files root =
@@ -78,7 +78,7 @@ let main input =
   let paths =
     match input with
     | Paths_on_stdin -> In_channel.lines stdin
-    | Root_path root -> Directory.find_files root
+    | Root_path root -> Directory_tree.find_files root
   in
   let paths_by_digest = Hashtbl.create 1_000_000 in
   let path_count = ref 0 in
