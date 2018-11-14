@@ -78,7 +78,10 @@ let main input =
     | Root_path root -> Stream.rec_file_paths ~root
   in
   let paths_by_digest = Hashtbl.create 1_000_000 in
+  let path_count = ref 0 in
+  let t0 = Sys.time () in
   Stream.iter paths ~f:(fun path ->
+    incr path_count;
     try
       let digest = Digest.file path in
       let paths =
@@ -100,7 +103,9 @@ let main input =
         List.iter paths ~f:(fun path -> printf "    %s\n%!" path)
       end
     )
-    paths_by_digest
+    paths_by_digest;
+  let t1 = Sys.time () in
+  eprintf "Processed %d files in %f seconds.\n%!" !path_count (t1 -. t0)
 
 let () =
   let input = ref Paths_on_stdin in
