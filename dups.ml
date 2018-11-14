@@ -112,7 +112,7 @@ let main input =
       let n_paths = StrSet.cardinal paths in
       if n_paths > 1 then begin
         printf "%s %d\n%!" (Digest.to_hex digest) n_paths;
-        List.iter (StrSet.elements paths) ~f:(printf "    %s\n%!")
+        List.iter (StrSet.elements paths) ~f:(printf "    %S\n%!")
       end
     )
     paths_by_digest;
