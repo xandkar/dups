@@ -6,7 +6,7 @@ having the same MD5 hash digest.
 
 It is roughly equivalent to the following one-liner:
 ```sh
-find . -type f -exec md5sum '{}' \; | awk '{paths[$1, ++cnt[$1]] = $2} END {for (path in cnt) {n = cnt[path]; if (n > 1) {print(path, n); for (i=1; i<=n; i++) {print("    ", paths[path, i])} } } }'
+find . -type f -exec md5sum '{}' \; | awk '{digest = $1; path = $2; paths[digest, ++count[digest]] = path} END {for (digest in count) {n = count[digest]; if (n > 1) {print(digest, n); for (i=1; i<=n; i++) {print "    ", paths[digest, i]} } } }'
 ```
 
 which, when indented, looks like:
@@ -14,15 +14,18 @@ which, when indented, looks like:
 find . -type f -exec md5sum '{}' \; \
 | awk '
     {
-        paths[$1, ++cnt[$1]] = $2
+        digest = $1
+        path = $2
+        paths[digest, ++count[digest]] = path
     }
+
     END {
-        for (path in cnt) {
-            n = cnt[path]
+        for (digest in count) {
+            n = count[digest]
             if (n > 1) {
-                print(path, n)
+                print(digest, n)
                 for (i=1; i<=n; i++) {
-                    print("    ", paths[path, i])
+                    print "    ", paths[digest, i]
                 }
             }
         }
