@@ -108,14 +108,13 @@ let make_output_fun = function
         );
         close_out oc
 
-let main input output =
+let main input output ignore =
   let output = make_output_fun  output in
   let input  = make_input_stream input in
   let paths_by_digest = Hashtbl.create 1_000_000 in
   let path_count = ref 0 in
   let t0 = Sys.time () in
-  Stream.iter input ~f:(fun path ->
-    incr path_count;
+  let process path =
     try
       let digest = Digest.file path in
       let count, paths =
@@ -128,6 +127,14 @@ let main input output =
       Hashtbl.replace paths_by_digest digest (count + 1, StrSet.add path paths)
     with Sys_error e ->
       eprintf "WARNING: Failed to process %S: %S\n%!" path e
+  in
+  Stream.iter input ~f:(fun path ->
+    incr path_count;
+    match ignore with
+    | Some regexp when (Str.string_match regexp path 0) ->
+        ()
+    | Some _ | None ->
+        process path
   );
   Hashtbl.iter (fun d (n, ps) -> if n > 1 then output d n ps) paths_by_digest;
   let t1 = Sys.time () in
@@ -136,6 +143,7 @@ let main input output =
 let () =
   let input  = ref Stdin in
   let output = ref Stdout in
+  let ignore = ref None in
   let assert_file_exists path =
     if Sys.file_exists path then
       ()
@@ -161,6 +169,10 @@ let () =
         )
       , " Output to this directory instead of stdout."
       )
+    ; ( "-ignore"
+      , Arg.String (fun regexp -> ignore := Some (Str.regexp regexp))
+      , " Ignore file paths which match this regexp pattern (see Str module)."
+      )
     ]
   in
   Arg.parse
@@ -175,4 +187,4 @@ let () =
           input := Directories (path :: paths)
     )
     "";
-  main !input !output
+  main !input !output !ignore

@@ -8,7 +8,7 @@ all:
 	@$(MAKE) -s build
 
 build:
-	@ocamlbuild -cflags '-w A' -pkg 'unix' $(EXE_NAME).$(EXE_TYPE)
+	@ocamlbuild -cflags '-w A' -pkgs 'str,unix' $(EXE_NAME).$(EXE_TYPE)
 	@cp _build/$(EXE_NAME).$(EXE_TYPE) $(EXE_NAME)
 	@rm -f $(EXE_NAME).$(EXE_TYPE)
 
