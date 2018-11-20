@@ -2,7 +2,7 @@ open Printf
 
 module Array = ArrayLabels
 module List  = ListLabels
-module StrSet= Set.Make(String)
+module StrSet = Set.Make(String)
 module Unix  = UnixLabels
 
 module Stream : sig
@@ -89,11 +89,16 @@ module File : sig
 
   val lookup : string Stream.t -> t Stream.t
   (** Lookup file info for given paths *)
+
+  module Set : sig include Set.S with type elt := t end
 end = struct
   type t =
     { path : string
     ; size : int
     }
+
+  let compare {path=p1; _} {path=p2; _} =
+    Stdlib.compare p1 p2
 
   let lookup paths =
     Stream.map paths ~f:(fun path ->
@@ -132,6 +137,12 @@ end = struct
           next ()
     in
     Stream.create next
+
+  module Set = Set.Make(struct
+    type elt = t
+    type t = elt
+    let compare = compare
+  end)
 end
 
 type input =
@@ -184,16 +195,18 @@ let make_input_stream input ignore count =
 
 let make_output_fun = function
   | Stdout ->
-      fun digest n_paths paths ->
-        printf "%s %d\n%!" (Digest.to_hex digest) n_paths;
-        List.iter (StrSet.elements paths) ~f:(printf "    %S\n%!")
+      fun digest n_files files ->
+        printf "%s %d\n%!" (Digest.to_hex digest) n_files;
+        List.iter (File.Set.elements files) ~f:(fun {File.path; _} ->
+          printf "    %S\n%!" path
+        )
   | Directory dir ->
-      fun digest _ paths ->
+      fun digest _ files ->
         let digest = Digest.to_hex digest in
         let dir = Filename.concat dir (String.sub digest 0 2) in
         Unix.mkdir dir ~perm:0o700;
         let oc = open_out (Filename.concat dir digest) in
-        List.iter (StrSet.elements paths) ~f:(fun path ->
+        List.iter (File.Set.elements files) ~f:(fun {File.path; _} ->
           output_string oc (sprintf "%S\n%!" path)
         );
         close_out oc
@@ -230,51 +243,58 @@ let main {input; output; ignore; sample = sample_len} =
   in
   let output = make_output_fun  output in
   let input  = make_input_stream input ignore count in
-  let paths_by_size = Hashtbl.create 1_000_000 in
-  let paths_by_sample = Hashtbl.create 1_000_000 in
-  let paths_by_digest = Hashtbl.create 1_000_000 in
-  let process tbl path ~f =
-    let key = f path in
-    let count, paths =
-      match Hashtbl.find_opt tbl key with
+  let files_by_size = Hashtbl.create 1_000_000 in
+  let files_by_sample = Hashtbl.create 1_000_000 in
+  let files_by_digest = Hashtbl.create 1_000_000 in
+  let process tbl ~group ~file =
+    let count, files =
+      match Hashtbl.find_opt tbl group with
       | None ->
-          (0, StrSet.empty)
-      | Some (n, paths) ->
-          (n, paths)
+          (0, File.Set.empty)
+      | Some (n, files) ->
+          (n, files)
     in
-    Hashtbl.replace tbl key (count + 1, StrSet.add path paths)
+    Hashtbl.replace tbl group (count + 1, File.Set.add file files)
   in
-  Stream.iter input ~f:(fun {File.path; size} ->
-    process paths_by_size path ~f:(fun _ -> size)
+  Stream.iter input ~f:(fun ({File.size; _} as file) ->
+    process files_by_size ~group:size ~file
   );
   Hashtbl.iter
-    (fun _ (n, paths) ->
+    (fun _ (n, files) ->
       (* Skip files with unique sizes *)
       if n > 1 then
-        StrSet.iter
-          (fun path ->
-            process paths_by_sample path ~f:(sample ~len:sample_len)
+        File.Set.iter
+          (fun ({File.path; _} as file) ->
+            process
+              files_by_sample
+              ~group:(sample path ~len:sample_len)
+              ~file
           )
-          paths
+          files
       else
         incr count.unique_size;
     )
-    paths_by_size;
+    files_by_size;
   Hashtbl.iter
-    (fun _ (n, paths) ->
+    (fun _ (n, files) ->
       (* Skip files with unique samples *)
       if n > 1 then
-        StrSet.iter
-          (fun path ->
+        File.Set.iter
+          (fun ({File.path; _} as file) ->
             incr count.hashed;
-            process paths_by_digest path ~f:Digest.file
+            process files_by_digest ~group:(Digest.file path) ~file
           )
-          paths
+          files
       else
         incr count.unique_sample;
     )
-    paths_by_sample;
-  Hashtbl.iter (fun d (n, ps) -> if n > 1 then output d n ps) paths_by_digest;
+    files_by_sample;
+  Hashtbl.iter
+    (fun d (n, files) ->
+      if n > 1 then
+        output d n files
+    )
+    files_by_digest;
   let t1 = Sys.time () in
   eprintf "Time                       : %f seconds\n%!" (t1 -. t0);
   eprintf "Considered                 : %d\n%!" !(count.considered);
