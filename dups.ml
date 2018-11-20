@@ -146,6 +146,7 @@ type opt =
   { input  : input
   ; output : output
   ; ignore : Str.regexp option
+  ; sample : int
   }
 
 type count =
@@ -153,6 +154,7 @@ type count =
   ; empty       : int ref
   ; ignored     : int ref
   ; unique_size : int ref
+  ; unique_sample : int ref
   ; hashed      : int ref
   }
 
@@ -196,7 +198,26 @@ let make_output_fun = function
         );
         close_out oc
 
-let main {input; output; ignore} =
+let sample path ~len =
+  let buf = Bytes.make len ' ' in
+  let ic = open_in_bin path in
+  let rec read pos len =
+    assert (len >= 0);
+    if len = 0 then
+      ()
+    else begin
+      let chunk_size = input ic buf pos len in
+      if chunk_size = 0 then (* EOF *)
+        ()
+      else
+        read (pos + chunk_size) (len - chunk_size)
+    end
+  in
+  read 0 len;
+  close_in ic;
+  Bytes.to_string buf
+
+let main {input; output; ignore; sample = sample_len} =
   let t0 = Sys.time () in
   let count =
     { considered  = ref 0
@@ -204,11 +225,13 @@ let main {input; output; ignore} =
     ; ignored     = ref 0
     ; unique_size = ref 0
     ; hashed      = ref 0
+    ; unique_sample     = ref 0
     }
   in
   let output = make_output_fun  output in
   let input  = make_input_stream input ignore count in
   let paths_by_size = Hashtbl.create 1_000_000 in
+  let paths_by_sample = Hashtbl.create 1_000_000 in
   let paths_by_digest = Hashtbl.create 1_000_000 in
   let process tbl path ~f =
     let key = f path in
@@ -230,14 +253,27 @@ let main {input; output; ignore} =
       if n > 1 then
         StrSet.iter
           (fun path ->
-            incr count.hashed;
-            process paths_by_digest path ~f:Digest.file
+            process paths_by_sample path ~f:(sample ~len:sample_len)
           )
           paths
       else
         incr count.unique_size;
     )
     paths_by_size;
+  Hashtbl.iter
+    (fun _ (n, paths) ->
+      (* Skip files with unique samples *)
+      if n > 1 then
+        StrSet.iter
+          (fun path ->
+            incr count.hashed;
+            process paths_by_digest path ~f:Digest.file
+          )
+          paths
+      else
+        incr count.unique_sample;
+    )
+    paths_by_sample;
   Hashtbl.iter (fun d (n, ps) -> if n > 1 then output d n ps) paths_by_digest;
   let t1 = Sys.time () in
   eprintf "Time                       : %f seconds\n%!" (t1 -. t0);
@@ -245,6 +281,7 @@ let main {input; output; ignore} =
   eprintf "Hashed                     : %d\n%!" !(count.hashed);
   eprintf "Skipped due to 0      size : %d\n%!" !(count.empty);
   eprintf "Skipped due to unique size : %d\n%!" !(count.unique_size);
+  eprintf "Skipped due to unique sample : %d\n%!" !(count.unique_sample);
   eprintf "Ignored due to regex match : %d\n%!" !(count.ignored)
 
 let get_opt () : opt =
@@ -263,6 +300,7 @@ let get_opt () : opt =
   let input  = ref Stdin in
   let output = ref Stdout in
   let ignore = ref None in
+  let sample = ref 256 in
   let spec =
     [ ( "-out"
       , Arg.String (fun path ->
@@ -275,6 +313,10 @@ let get_opt () : opt =
     ; ( "-ignore"
       , Arg.String (fun regexp -> ignore := Some (Str.regexp regexp))
       , " Ignore file paths which match this regexp pattern (see Str module)."
+      )
+    ; ( "-sample"
+      , Arg.Set_int sample
+      , (sprintf " Byte size of file samples to use. Default: %d" !sample)
       )
     ]
   in
@@ -290,9 +332,14 @@ let get_opt () : opt =
           input := Directories (path :: paths)
     )
     "";
+  assert_
+    (fun x -> x > 0)
+    !sample
+    (sprintf "Sample size cannot be negative: %d" !sample);
   { input  = !input
   ; output = !output
   ; ignore = !ignore
+  ; sample = !sample
   }
 
 let () =
