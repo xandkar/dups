@@ -142,6 +142,12 @@ type output =
   | Stdout
   | Directory of string
 
+type opt =
+  { input  : input
+  ; output : output
+  ; ignore : Str.regexp option
+  }
+
 type count =
   { considered  : int ref
   ; empty       : int ref
@@ -190,7 +196,7 @@ let make_output_fun = function
         );
         close_out oc
 
-let main input output ignore =
+let main {input; output; ignore} =
   let t0 = Sys.time () in
   let count =
     { considered  = ref 0
@@ -241,26 +247,22 @@ let main input output ignore =
   eprintf "Skipped due to unique size : %d\n%!" !(count.unique_size);
   eprintf "Ignored due to regex match : %d\n%!" !(count.ignored)
 
-let () =
+let get_opt () : opt =
+  let assert_ test x msg =
+    if not (test x) then begin
+      eprintf "%s\n%!" msg;
+      exit 1
+    end
+  in
+  let assert_file_exists path =
+    assert_ Sys.file_exists path (sprintf "File does not exist: %S" path)
+  in
+  let assert_file_is_dir path =
+    assert_ Sys.is_directory path (sprintf "File is not a directory: %S" path)
+  in
   let input  = ref Stdin in
   let output = ref Stdout in
   let ignore = ref None in
-  let assert_file_exists path =
-    if Sys.file_exists path then
-      ()
-    else begin
-      eprintf "File does not exist: %S\n%!" path;
-      exit 1
-    end
-  in
-  let assert_file_is_dir path =
-    if Sys.is_directory path then
-      ()
-    else begin
-      eprintf "File is not a directory: %S\n%!" path;
-      exit 1
-    end
-  in
   let spec =
     [ ( "-out"
       , Arg.String (fun path ->
@@ -288,4 +290,10 @@ let () =
           input := Directories (path :: paths)
     )
     "";
-  main !input !output !ignore
+  { input  = !input
+  ; output = !output
+  ; ignore = !ignore
+  }
+
+let () =
+  main (get_opt ())
