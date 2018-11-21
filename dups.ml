@@ -256,6 +256,15 @@ let main {input; output; ignore; sample = sample_len} =
     in
     Hashtbl.replace tbl group (count + 1, File.Set.add file files)
   in
+  (* TODO: Make a nice(r) abstraction to re-assemble pieces in the pipeline:
+   *
+   * from input           to files_by_size
+   * from files_by_size   to files_by_sample
+   * from files_by_sample to files_by_digest
+   * from files_by_digest to output
+   *
+   * input |> files_by_size |> files_by_sample |> files_by_digest |> output
+   *)
   Stream.iter input ~f:(fun ({File.size; _} as file) ->
     process files_by_size ~group:size ~file
   );
