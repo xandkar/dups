@@ -161,13 +161,24 @@ type opt =
   }
 
 type count =
-  { considered  : int ref
-  ; empty       : int ref
-  ; ignored     : int ref
-  ; unique_size : int ref
-  ; unique_sample : int ref
-  ; hashed      : int ref
+  { considered_files    : int ref
+  ; considered_bytes    : int ref
+  ; empty               : int ref
+  ; ignored_files       : int ref
+  ; ignored_bytes       : int ref
+  ; unique_size_files   : int ref
+  ; unique_size_bytes   : int ref
+  ; unique_sample_files : int ref
+  ; unique_sample_bytes : int ref
+  ; sampled_files       : int ref
+  ; sampled_bytes       : int ref
+  ; hashed_files        : int ref
+  ; hashed_bytes        : int ref
+  ; digests             : int ref
   }
+
+let add sum addend =
+  sum := !sum + addend
 
 let make_input_stream input ignore count =
   let input =
@@ -179,17 +190,19 @@ let make_input_stream input ignore count =
         Stream.concat (List.map paths ~f:File.find)
   in
   Stream.filter input ~f:(fun {File.path; size} ->
-    incr count.considered;
+    incr count.considered_files;
+    add count.considered_bytes size;
     let empty = size = 0 in
     let ignored =
       match ignore with
       | Some regexp when (Str.string_match regexp path 0) ->
+          incr count.ignored_files;
+          add count.ignored_bytes size;
           true
       | Some _ | None ->
           false
     in
     if empty   then incr count.empty;
-    if ignored then incr count.ignored;
     (not empty) && (not ignored)
   )
 
@@ -211,7 +224,7 @@ let make_output_fun = function
         );
         close_out oc
 
-let sample path ~len =
+let sample path ~len ~count =
   let buf = Bytes.make len ' ' in
   let ic = open_in_bin path in
   let rec read pos len =
@@ -220,6 +233,7 @@ let sample path ~len =
       ()
     else begin
       let chunk_size = input ic buf pos len in
+      add count.sampled_bytes chunk_size;
       if chunk_size = 0 then (* EOF *)
         ()
       else
@@ -233,12 +247,20 @@ let sample path ~len =
 let main {input; output; ignore; sample = sample_len} =
   let t0 = Sys.time () in
   let count =
-    { considered  = ref 0
-    ; empty       = ref 0
-    ; ignored     = ref 0
-    ; unique_size = ref 0
-    ; hashed      = ref 0
-    ; unique_sample     = ref 0
+    { considered_files    = ref 0
+    ; considered_bytes    = ref 0
+    ; empty               = ref 0
+    ; ignored_files       = ref 0
+    ; ignored_bytes       = ref 0
+    ; unique_size_files   = ref 0
+    ; unique_size_bytes   = ref 0
+    ; sampled_files       = ref 0
+    ; sampled_bytes       = ref 0
+    ; hashed_files        = ref 0
+    ; hashed_bytes        = ref 0
+    ; unique_sample_files = ref 0
+    ; unique_sample_bytes = ref 0
+    ; digests             = ref 0
     }
   in
   let output = make_output_fun  output in
@@ -265,53 +287,94 @@ let main {input; output; ignore; sample = sample_len} =
    *
    * input |> files_by_size |> files_by_sample |> files_by_digest |> output
    *)
+  let t0_group_by_size = Sys.time () in
   Stream.iter input ~f:(fun ({File.size; _} as file) ->
     process files_by_size ~group:size ~file
   );
+  let t1_group_by_size = Sys.time () in
+  let t0_group_by_sample = Sys.time () in
   Hashtbl.iter
     (fun _ (n, files) ->
       (* Skip files with unique sizes *)
       if n > 1 then
         File.Set.iter
           (fun ({File.path; _} as file) ->
+            incr count.sampled_files;
             process
               files_by_sample
-              ~group:(sample path ~len:sample_len)
+              ~group:(sample path ~len:sample_len ~count)
               ~file
           )
           files
       else
-        incr count.unique_size;
+        File.Set.iter
+          (fun {File.size; _} ->
+            incr count.unique_size_files;
+            add count.unique_size_bytes size
+          )
+          files
     )
     files_by_size;
+  let t1_group_by_sample = Sys.time () in
+  let t0_group_by_digest = Sys.time () in
   Hashtbl.iter
     (fun _ (n, files) ->
       (* Skip files with unique samples *)
       if n > 1 then
         File.Set.iter
-          (fun ({File.path; _} as file) ->
-            incr count.hashed;
+          (fun ({File.path; size} as file) ->
+            incr count.hashed_files;
+            add count.hashed_bytes size;
             process files_by_digest ~group:(Digest.file path) ~file
           )
           files
       else
-        incr count.unique_sample;
+        File.Set.iter
+          (fun {File.size; _} ->
+            incr count.unique_sample_files;
+            add count.unique_sample_bytes size;
+          )
+          files
     )
     files_by_sample;
+  let t1_group_by_digest = Sys.time () in
   Hashtbl.iter
     (fun d (n, files) ->
+      incr count.digests;
       if n > 1 then
         output d n files
     )
     files_by_digest;
   let t1 = Sys.time () in
-  eprintf "Time                       : %f seconds\n%!" (t1 -. t0);
-  eprintf "Considered                 : %d\n%!" !(count.considered);
-  eprintf "Hashed                     : %d\n%!" !(count.hashed);
-  eprintf "Skipped due to 0      size : %d\n%!" !(count.empty);
-  eprintf "Skipped due to unique size : %d\n%!" !(count.unique_size);
-  eprintf "Skipped due to unique sample : %d\n%!" !(count.unique_sample);
-  eprintf "Ignored due to regex match : %d\n%!" !(count.ignored)
+  let b_to_mb b = (float_of_int b) /. 1024. /. 1024. in
+  let b_to_gb b = (b_to_mb b) /. 1024. in
+  eprintf "Time                         : %8.2f seconds\n%!" (t1 -. t0);
+  eprintf "Considered                   : %8d files  %6.2f Gb\n%!"
+    !(count.considered_files)
+    (b_to_gb !(count.considered_bytes));
+  eprintf "Sampled                      : %8d files  %6.2f Gb\n%!"
+    !(count.sampled_files)
+    (b_to_gb !(count.sampled_bytes));
+  eprintf "Hashed                       : %8d files  %6.2f Gb  %6.2f seconds\n%!"
+    !(count.hashed_files)
+    (b_to_gb !(count.hashed_bytes))
+    (t1_group_by_digest -. t0_group_by_digest);
+  eprintf "Digests                      : %8d\n%!"
+    !(count.digests);
+  eprintf "Duplicates (Hashed - Digests): %8d\n%!"
+    (!(count.hashed_files) - !(count.digests));
+  eprintf "Skipped due to 0      size   : %8d files\n%!" !(count.empty);
+  eprintf "Skipped due to unique size   : %8d files  %6.2f Gb  %6.2f seconds\n%!"
+    !(count.unique_size_files)
+    (b_to_gb !(count.unique_size_bytes))
+    (t1_group_by_size -. t0_group_by_size);
+  eprintf "Skipped due to unique sample : %8d files  %6.2f Gb  %6.2f seconds\n%!"
+    !(count.unique_sample_files)
+    (b_to_gb !(count.unique_sample_bytes))
+    (t1_group_by_sample -. t0_group_by_sample);
+  eprintf "Ignored due to regex match   : %8d files  %6.2f Gb\n%!"
+    !(count.ignored_files)
+    (b_to_gb !(count.ignored_bytes))
 
 let get_opt () : opt =
   let assert_ test x msg =
