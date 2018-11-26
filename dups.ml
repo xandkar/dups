@@ -36,6 +36,8 @@ module Metrics : sig
     : t -> size:int -> unit
   val digest
     : t -> unit
+  val redundant_data
+    : t -> size:int -> unit
 end = struct
   type t =
     { considered_files    : int ref
@@ -52,6 +54,7 @@ end = struct
     ; hashed_files        : int ref
     ; hashed_bytes        : int ref
     ; digests             : int ref
+    ; redundant_data      : int ref
     }
 
   let init () =
@@ -69,6 +72,7 @@ end = struct
     ; unique_sample_files = ref 0
     ; unique_sample_bytes = ref 0
     ; digests             = ref 0
+    ; redundant_data      = ref 0
     }
 
   let add sum addend =
@@ -106,6 +110,9 @@ end = struct
   let digest t =
     incr t.digests
 
+  let redundant_data t ~size =
+    add t.redundant_data size
+
   let report
     t
     ~time_all
@@ -129,8 +136,9 @@ end = struct
       time_group_by_digest;
     eprintf "Digests                      : %8d\n%!"
       !(t.digests);
-    eprintf "Duplicates (Hashed - Digests): %8d\n%!"
-      (!(t.hashed_files) - !(t.digests));
+    eprintf "Duplicates (Hashed - Digests): %8d files  %6.2f Gb\n%!"
+      (!(t.hashed_files) - !(t.digests))
+      (b_to_gb !(t.redundant_data));
     eprintf "Skipped due to 0      size   : %8d files\n%!" !(t.empty);
     eprintf "Skipped due to unique size   : %8d files  %6.2f Gb  %6.2f seconds\n%!"
       !(t.unique_size_files)
@@ -454,7 +462,9 @@ let main {input; output; ignore; sample = sample_len} =
 
   Stream.iter groups ~f:(fun (d, n, files) ->
     M.digest metrics;
-    if n > 1 then output d n files
+    if n > 1 then
+      M.redundant_data metrics ~size:(n * (List.hd files).File.size);
+      output d n files
   );
 
   let t1_all = Sys.time () in
