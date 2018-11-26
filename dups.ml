@@ -380,7 +380,7 @@ type output =
 type opt =
   { input  : input
   ; output : output
-  ; ignore : Str.regexp option
+  ; ignore : string -> bool
   ; sample : int
   }
 
@@ -396,15 +396,9 @@ let make_input_stream input ignore ~metrics =
   Stream.filter input ~f:(fun {File.path; size} ->
     M.file_considered metrics ~size;
     let empty = size = 0 in
+    let ignored = ignore path in
     if empty then M.file_empty metrics;
-    let ignored =
-      match ignore with
-      | Some regexp when (Str.string_match regexp path 0) ->
-          M.file_ignored metrics ~size;
-          true
-      | Some _ | None ->
-          false
-    in
+    if ignored then M.file_ignored metrics ~size;
     (not empty) && (not ignored)
   )
 
@@ -490,7 +484,7 @@ let get_opt () : opt =
   in
   let input  = ref Stdin in
   let output = ref Stdout in
-  let ignore = ref None in
+  let ignore = ref (fun _ -> false) in
   let sample = ref 256 in
   let spec =
     [ ( "-out"
@@ -502,7 +496,9 @@ let get_opt () : opt =
       , " Output to this directory instead of stdout."
       )
     ; ( "-ignore"
-      , Arg.String (fun regexp -> ignore := Some (Str.regexp regexp))
+      , Arg.String (fun regexp ->
+          let regexp = Str.regexp regexp in
+          ignore := fun string -> Str.string_match regexp string 0)
       , " Ignore file paths which match this regexp pattern (see Str module)."
       )
     ; ( "-sample"
