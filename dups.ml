@@ -283,7 +283,6 @@ end = struct
   end
 
   let lord t ~njobs ~vassals ~ic ~ocs =
-    eprintf "[debug] [lord] started\n%!";
     let active_vassals = ref njobs in
     let results = Queue.create () in
     let rec dispatch () =
@@ -316,7 +315,6 @@ end = struct
     of_queue results
 
   let vassal i ~f ~vassal_pipe_r ~lord_pipe_w =
-    eprintf "[debug] [vassal %d] started\n%!" i;
     let ic = Unix.in_channel_of_descr vassal_pipe_r in
     let oc = Unix.out_channel_of_descr lord_pipe_w in
     let rec work msg =
