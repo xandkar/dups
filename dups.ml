@@ -381,6 +381,8 @@ module File : sig
   val lookup : string Stream.t -> t Stream.t
   (** Lookup file info for given paths *)
 
+  val head : t -> len:int -> metrics:M.t -> string
+
   val filter_out_unique_sizes : t Stream.t -> metrics:M.t -> t Stream.t
   val filter_out_unique_heads : t Stream.t -> len:int -> metrics:M.t -> t Stream.t
 end = struct
@@ -444,7 +446,8 @@ end = struct
       ~group:(fun {size; _} -> size)
       ~handle_singleton:(fun (size, _, _) -> M.file_unique_size metrics ~size)
 
-  let head path ~len ~metrics =
+  let head {path; _} ~len ~metrics =
+    M.file_sampled metrics;
     let buf = Bytes.make len ' ' in
     let ic = open_in_bin path in
     let rec read pos len =
@@ -467,10 +470,7 @@ end = struct
   let filter_out_unique_heads files ~len ~metrics =
     filter_out_singletons
       files
-      ~group:(fun {path; _} ->
-        M.file_sampled metrics;
-        head path ~len ~metrics
-      )
+      ~group:(head ~len ~metrics)
       ~handle_singleton:(fun (_, _, files) ->
         let {size; _} = List.hd files in  (* Guaranteed non-empty *)
         M.file_unique_sample metrics ~size
@@ -563,7 +563,20 @@ let main {input; output; ignore; sample = sample_len; njobs} =
   let wt0_group_by_sample = wt1_group_by_size in
   let pt0_group_by_sample = pt1_group_by_size in
   eprintf "[debug] filtering-out files with unique heads\n%!";
-  let files = File.filter_out_unique_heads files ~len:sample_len ~metrics in
+  let files =
+    if njobs > 1 then begin
+      let q = Queue.create () in
+      files
+        |> Stream.bag_map ~njobs ~f:(File.head ~len:sample_len ~metrics)
+        |> Stream.group_by ~f:snd
+        |> Stream.map ~f:(fun (d, n, pairs) -> (d, n, List.map pairs ~f:fst))
+        |> Stream.filter ~f:(fun (_, n, _) -> n > 1)
+        |> Stream.iter ~f:(fun (_, _, fs) -> List.iter fs ~f:(fun f -> Queue.add f q))
+        ;
+      Stream.of_queue q
+    end else
+      File.filter_out_unique_heads files ~len:sample_len ~metrics
+  in
   let pt1_group_by_sample = time_proc () in
   let wt1_group_by_sample = time_wall () in
 
@@ -572,10 +585,10 @@ let main {input; output; ignore; sample = sample_len; njobs} =
   eprintf "[debug] hashing\n%!";
   let groups =
     if njobs > 1 then
-      let digests =
+      let with_digests =
         Stream.bag_map files ~njobs ~f:(fun {File.path; _} -> Digest.file path)
       in
-      Stream.map (Stream.group_by digests ~f:(fun (_, d) -> d)) ~f:(
+      Stream.map (Stream.group_by with_digests ~f:snd) ~f:(
         fun (digest, n, file_digest_pairs) ->
           let files =
             List.map file_digest_pairs ~f:(fun (file, _) ->
@@ -632,7 +645,7 @@ let get_opt () : opt =
   let output = ref Stdout in
   let ignore = ref (fun _ -> false) in
   let sample = ref 512 in
-  let njobs  = ref 8 in
+  let njobs  = ref 6 in
   let spec =
     [ ( "-out"
       , Arg.String (fun path ->
