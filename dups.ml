@@ -12,10 +12,14 @@ module Metrics : sig
     : unit -> t
   val report
     : t
-    -> time_all:float
-    -> time_group_by_size:float
-    -> time_group_by_head:float
-    -> time_group_by_digest:float
+    -> wall_time_all:float
+    -> wall_time_group_by_size:float
+    -> wall_time_group_by_head:float
+    -> wall_time_group_by_digest:float
+    -> proc_time_all:float
+    -> proc_time_group_by_size:float
+    -> proc_time_group_by_head:float
+    -> proc_time_group_by_digest:float
     -> unit
 
   val file_considered
@@ -115,39 +119,47 @@ end = struct
 
   let report
     t
-    ~time_all
-    ~time_group_by_size
-    ~time_group_by_head
-    ~time_group_by_digest
+    ~wall_time_all
+    ~wall_time_group_by_size
+    ~wall_time_group_by_head
+    ~wall_time_group_by_digest
+    ~proc_time_all
+    ~proc_time_group_by_size
+    ~proc_time_group_by_head
+    ~proc_time_group_by_digest
   =
     let b_to_mb b = (float_of_int b) /. 1024. /. 1024. in
     let b_to_gb b = (b_to_mb b) /. 1024. in
-    eprintf "Time                         : %8.2f seconds\n%!"
-      time_all;
+    eprintf "Total time                   : %.2f wall sec  %.2f proc sec\n%!"
+      wall_time_all
+      proc_time_all;
     eprintf "Considered                   : %8d files  %6.2f Gb\n%!"
       !(t.considered_files)
       (b_to_gb !(t.considered_bytes));
     eprintf "Sampled                      : %8d files  %6.2f Gb\n%!"
       !(t.sampled_files)
       (b_to_gb !(t.sampled_bytes));
-    eprintf "Hashed                       : %8d files  %6.2f Gb  %6.2f seconds\n%!"
+    eprintf "Hashed                       : %8d files  %6.2f Gb  %6.2f wall sec  %6.2f proc sec\n%!"
       !(t.hashed_files)
       (b_to_gb !(t.hashed_bytes))
-      time_group_by_digest;
+      wall_time_group_by_digest
+      proc_time_group_by_digest;
     eprintf "Digests                      : %8d\n%!"
       !(t.digests);
     eprintf "Duplicates (Hashed - Digests): %8d files  %6.2f Gb\n%!"
       (!(t.hashed_files) - !(t.digests))
       (b_to_gb !(t.redundant_data));
     eprintf "Skipped due to 0      size   : %8d files\n%!" !(t.empty);
-    eprintf "Skipped due to unique size   : %8d files  %6.2f Gb  %6.2f seconds\n%!"
+    eprintf "Skipped due to unique size   : %8d files  %6.2f Gb  %6.2f wall sec  %6.2f proc sec\n%!"
       !(t.unique_size_files)
       (b_to_gb !(t.unique_size_bytes))
-      time_group_by_size;
-    eprintf "Skipped due to unique sample : %8d files  %6.2f Gb  %6.2f seconds\n%!"
+      wall_time_group_by_size
+      proc_time_group_by_size;
+    eprintf "Skipped due to unique sample : %8d files  %6.2f Gb  %6.2f wall sec  %6.2f proc sec\n%!"
       !(t.unique_sample_files)
       (b_to_gb !(t.unique_sample_bytes))
-      time_group_by_head;
+      wall_time_group_by_head
+      proc_time_group_by_head;
     eprintf "Ignored due to regex match   : %8d files  %6.2f Gb\n%!"
       !(t.ignored_files)
       (b_to_gb !(t.ignored_bytes))
@@ -517,11 +529,15 @@ let make_output_fun = function
         );
         close_out oc
 
-let time () =
+let time_wall () =
   Unix.gettimeofday ()
 
+let time_proc () =
+  Sys.time ()
+
 let main {input; output; ignore; sample = sample_len; njobs} =
-  let t0_all = time () in
+  let wt0_all = time_wall () in
+  let pt0_all = time_proc () in
   let metrics = M.init () in
   let output = make_output_fun  output in
   let input  = make_input_stream input ignore ~metrics in
@@ -537,17 +553,22 @@ let main {input; output; ignore; sample = sample_len; njobs} =
 
   let files = input in
 
-  let t0_group_by_size = time () in
+  let wt0_group_by_size = time_wall () in
+  let pt0_group_by_size = time_proc () in
   eprintf "[debug] filtering-out files with unique size\n%!";
   let files = File.filter_out_unique_sizes files ~metrics in
-  let t1_group_by_size = time () in
+  let pt1_group_by_size = time_proc () in
+  let wt1_group_by_size = time_wall () in
 
-  let t0_group_by_sample = t1_group_by_size in
+  let wt0_group_by_sample = wt1_group_by_size in
+  let pt0_group_by_sample = pt1_group_by_size in
   eprintf "[debug] filtering-out files with unique heads\n%!";
   let files = File.filter_out_unique_heads files ~len:sample_len ~metrics in
-  let t1_group_by_sample = time () in
+  let pt1_group_by_sample = time_proc () in
+  let wt1_group_by_sample = time_wall () in
 
-  let t0_group_by_digest = t1_group_by_sample in
+  let wt0_group_by_digest = wt1_group_by_sample in
+  let pt0_group_by_digest = pt1_group_by_sample in
   eprintf "[debug] hashing\n%!";
   let groups =
     if njobs > 1 then
@@ -570,7 +591,8 @@ let main {input; output; ignore; sample = sample_len; njobs} =
         Digest.file path
       )
   in
-  let t1_group_by_digest = time () in
+  let pt1_group_by_digest = time_proc () in
+  let wt1_group_by_digest = time_wall () in
 
   eprintf "[debug] reporting\n%!";
   Stream.iter groups ~f:(fun (d, n, files) ->
@@ -580,13 +602,18 @@ let main {input; output; ignore; sample = sample_len; njobs} =
       output d n files
   );
 
-  let t1_all = time () in
+  let pt1_all = time_proc () in
+  let wt1_all = time_wall () in
 
   M.report metrics
-    ~time_all:            (t1_all             -. t0_all)
-    ~time_group_by_size:  (t1_group_by_size   -. t0_group_by_size)
-    ~time_group_by_head:  (t1_group_by_sample -. t0_group_by_sample)
-    ~time_group_by_digest:(t1_group_by_digest -. t0_group_by_digest)
+    ~wall_time_all:            (wt1_all             -. wt0_all)
+    ~wall_time_group_by_size:  (wt1_group_by_size   -. wt0_group_by_size)
+    ~wall_time_group_by_head:  (wt1_group_by_sample -. wt0_group_by_sample)
+    ~wall_time_group_by_digest:(wt1_group_by_digest -. wt0_group_by_digest)
+    ~proc_time_all:            (pt1_all             -. pt0_all)
+    ~proc_time_group_by_size:  (pt1_group_by_size   -. pt0_group_by_size)
+    ~proc_time_group_by_head:  (pt1_group_by_sample -. pt0_group_by_sample)
+    ~proc_time_group_by_digest:(pt1_group_by_digest -. pt0_group_by_digest)
 
 let get_opt () : opt =
   let assert_ test x msg =
