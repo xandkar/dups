@@ -354,16 +354,27 @@ end = struct
 end
 
 module In_channel : sig
-  val lines : in_channel -> string Stream.t
+  val lines : ?delim_null:bool -> in_channel -> string Stream.t
 end = struct
-  let lines ic =
-    Stream.create (fun () ->
-      match input_line ic with
-      | exception End_of_file ->
-          None
-      | line ->
-          Some line
-    )
+  let read_until_newline ic () =
+    match input_line ic with
+    | exception End_of_file ->
+        None
+    | line ->
+        Some line
+
+  let read_until_null ic =
+    let lexbuf = Lexing.from_channel ic in
+    fun () -> Input_delim.by_null lexbuf
+
+  let lines ?(delim_null=false) ic =
+    let reader =
+      if delim_null then
+        read_until_null ic
+      else
+        read_until_newline ic
+    in
+    Stream.create reader
 end
 
 module File : sig
@@ -488,13 +499,14 @@ type opt =
   ; ignore : string -> bool
   ; sample : int
   ; njobs  : int
+  ; delim_null : bool
   }
 
-let make_input_stream input ignore ~metrics =
+let make_input_stream input ignore ~metrics ~delim_null =
   let input =
     match input with
     | Stdin ->
-        File.lookup (In_channel.lines stdin)
+        File.lookup (In_channel.lines stdin ~delim_null)
     | Directories paths ->
         let paths = StrSet.elements (StrSet.of_list paths) in
         Stream.concat (List.map paths ~f:File.find)
@@ -532,12 +544,12 @@ let time_wall () =
 let time_proc () =
   Sys.time ()
 
-let main {input; output; ignore; sample = sample_len; njobs} =
+let main {input; output; ignore; sample = sample_len; njobs; delim_null} =
   let wt0_all = time_wall () in
   let pt0_all = time_proc () in
   let metrics = M.init () in
   let output = make_output_fun  output in
-  let input  = make_input_stream input ignore ~metrics in
+  let input  = make_input_stream input ignore ~metrics ~delim_null in
   (* TODO: Make a nice(r) abstraction to re-assemble pieces in the pipeline:
    *
    * from input           to files_by_size
@@ -643,6 +655,7 @@ let get_opt () : opt =
   let ignore = ref (fun _ -> false) in
   let sample = ref 512 in
   let njobs  = ref 6 in
+  let input_delim_null = ref false in
   let spec =
     [ ( "-out"
       , Arg.String (fun path ->
@@ -665,6 +678,16 @@ let get_opt () : opt =
     ; ( "-j"
       , Arg.Set_int njobs
       , (sprintf " Number of parallel jobs. Default: %d" !njobs)
+      )
+    ; ( "-0"
+      , Arg.Set input_delim_null
+      , ( sprintf
+            ( " Delimit input paths by null character instead of a newline."
+            ^^" Meaningful only when reading candidate paths from stdin."
+            ^^" Default: %B"
+            )
+            !input_delim_null
+        )
       )
     ]
   in
@@ -689,6 +712,7 @@ let get_opt () : opt =
   ; ignore = !ignore
   ; sample = !sample
   ; njobs  = !njobs
+  ; delim_null = !input_delim_null
   }
 
 let () =
