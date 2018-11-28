@@ -286,18 +286,18 @@ end = struct
     let active_vassals = ref njobs in
     let results = Queue.create () in
     let rec dispatch () =
-      match Ipc.recv ic with
-      | ((Exiting i) : ('input, 'output) msg_from_vassal) ->
+      match ((Ipc.recv ic) : ('input, 'output) msg_from_vassal) with
+      | Exiting i ->
           close_out ocs.(i);
           decr active_vassals;
           if !active_vassals = 0 then
             ()
           else
             dispatch ()
-      | ((Ready i) : ('input, 'output) msg_from_vassal) ->
+      | Ready i ->
           Ipc.send ocs.(i) (Job (next t));
           dispatch ()
-      | ((Result (i, result)) : ('input, 'output) msg_from_vassal) ->
+      | Result (i, result) ->
           Queue.add result results;
           Ipc.send ocs.(i) (Job (next t));
           dispatch ()
@@ -319,10 +319,10 @@ end = struct
     let oc = Unix.out_channel_of_descr lord_pipe_w in
     let rec work msg =
       Ipc.send oc msg;
-      match Ipc.recv ic with
-      | (Job (Some x) : 'input msg_from_lord) ->
+      match (Ipc.recv ic : 'input msg_from_lord) with
+      | Job (Some x) ->
           work (Result (i, (x, f x)))
-      | (Job None : 'input msg_from_lord) ->
+      | Job None ->
           Ipc.send oc (Exiting i)
     in
     work (Ready i);
