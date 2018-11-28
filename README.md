@@ -1,10 +1,10 @@
 dups
 ====
 
-Find duplicate files in given directory trees. Where "duplicate" is defined as
-having the same (and non-0) file size and MD5 hash digest.
+Find duplicate files in N given directory trees. Where "duplicate" is defined
+as having the same (and non-0) file size and MD5 hash digest.
 
-It is roughly equivalent to the following one-liner:
+It is roughly equivalent to the following one-liner (included as `dups.sh`):
 ```sh
 find . -type f -print0 | xargs -0 -P 6 -I % md5sum % | awk '{digest = $1;  sub("^" $1 " +", ""); path = $0; paths[digest, ++cnt[digest]] = path} END {for (digest in cnt) {n = cnt[digest]; if (n > 1) {print(digest, n); for (i=1; i<=n; i++) {printf "    %s\n", paths[digest, i]} } } }'
 ```
