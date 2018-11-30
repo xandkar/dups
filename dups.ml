@@ -619,9 +619,10 @@ let main {input; output; ignore; sample = sample_len; njobs; delim_null} =
   eprintf "[debug] reporting\n%!";
   Stream.iter groups ~f:(fun (d, n, files) ->
     M.digest metrics;
-    if n > 1 then
+    if n > 1 then begin
       M.redundant_data metrics ~size:(n * (List.hd files).File.size);
       output d n files
+    end
   );
 
   let pt1_all = time_proc () in
