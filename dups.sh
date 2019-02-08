@@ -1,6 +1,6 @@
 #! /bin/sh
 
-find $@ -type f -print0 \
+find $@ -type f -size +0 -print0 \
 | xargs -0 -P $(nproc) md5sum \
 | awk '
     {
