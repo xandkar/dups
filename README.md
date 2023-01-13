@@ -105,3 +105,12 @@ Skipped due to unique size : 74
 Ignored due to regex match : 0
 
 ```
+
+TODO
+-------------------------------------------------------------------------------
+
+- [ ] Look into integrating with external tools for perceptual hashing and the like
+  - https://github.com/knjcode/imgdupes
+  - https://github.com/visual-layer/fastdup
+- [ ] Consider implementing perceptual hashing
+- [ ] Consider rewriting in Rust
