@@ -114,3 +114,5 @@ TODO
   - https://github.com/visual-layer/fastdup
 - [ ] Consider implementing perceptual hashing
 - [ ] Consider rewriting in Rust
+- [ ] Can Cayley hashing speed anything up?
+  <https://github.com/benwr/bromberg_sl2>
